@@ -28,7 +28,8 @@ import (
 
 // VAD 语音活动检测器
 type VAD struct {
-	inst *vadInst
+	inst         *vadInst
+	sampleBuffer []int16
 }
 
 // New 创建一个新的VAD实例
@@ -86,6 +87,18 @@ func (v *VAD) SetMode(mode int) error {
 //   - 音频帧长度必须是10ms、20ms或30ms
 //   - buf长度应该是 (sampleRate * frameDurationMs / 1000) * 2 字节
 func (v *VAD) IsSpeech(buf []byte, sampleRate int) (bool, error) {
+	// 将字节数组转换为int16数组
+	audioFrame := v.bytesToInt16(buf)
+
+	return v.IsSpeechInt16(audioFrame, sampleRate)
+}
+
+// IsSpeechInt16 检测int16音频帧中是否包含语音。
+//
+// 参数:
+//   - audioFrame: 16位PCM音频数据（样本数组）
+//   - sampleRate: 采样率，必须是8000, 16000, 32000或48000 Hz
+func (v *VAD) IsSpeechInt16(audioFrame []int16, sampleRate int) (bool, error) {
 	if v.inst.initFlag != kInitCheck {
 		return false, errors.New("VAD not initialized")
 	}
@@ -96,15 +109,12 @@ func (v *VAD) IsSpeech(buf []byte, sampleRate int) (bool, error) {
 	}
 
 	// 计算帧长度（样本数）
-	frameLength := len(buf) / 2 // 16位 = 2字节
+	frameLength := len(audioFrame)
 
 	// 验证帧长度
 	if !ValidRateAndFrameLength(sampleRate, frameLength) {
 		return false, fmt.Errorf("invalid frame length %d for sample rate %d", frameLength, sampleRate)
 	}
-
-	// 将字节数组转换为int16数组
-	audioFrame := bytesToInt16(buf)
 
 	// 处理音频并返回VAD决策
 	vad, err := process(v.inst, sampleRate, audioFrame)
@@ -164,7 +174,7 @@ func isValidSampleRate(rate int) bool {
 //   - error: 错误信息
 func (v *VAD) IsSpeechBatch(frames [][]byte, sampleRate int) ([]bool, error) {
 	results := make([]bool, len(frames))
-	
+
 	for i, frame := range frames {
 		isSpeech, err := v.IsSpeech(frame, sampleRate)
 		if err != nil {
@@ -172,7 +182,7 @@ func (v *VAD) IsSpeechBatch(frames [][]byte, sampleRate int) ([]bool, error) {
 		}
 		results[i] = isSpeech
 	}
-	
+
 	return results, nil
 }
 
@@ -191,7 +201,7 @@ func (v *VAD) IsSpeechBatchTo(frames [][]byte, sampleRate int, results []bool) e
 	if len(results) < len(frames) {
 		return errors.New("results array too small")
 	}
-	
+
 	for i, frame := range frames {
 		isSpeech, err := v.IsSpeech(frame, sampleRate)
 		if err != nil {
@@ -199,14 +209,17 @@ func (v *VAD) IsSpeechBatchTo(frames [][]byte, sampleRate int, results []bool) e
 		}
 		results[i] = isSpeech
 	}
-	
+
 	return nil
 }
 
 // 辅助函数：将字节数组转换为int16数组（小端序）
-func bytesToInt16(buf []byte) []int16 {
+func (v *VAD) bytesToInt16(buf []byte) []int16 {
 	length := len(buf) / 2
-	result := make([]int16, length)
+	if cap(v.sampleBuffer) < length {
+		v.sampleBuffer = make([]int16, length)
+	}
+	result := v.sampleBuffer[:length]
 
 	for i := 0; i < length; i++ {
 		// 小端序：低字节在前

@@ -6,6 +6,14 @@ import (
 	"testing"
 )
 
+func testBytesToInt16(buf []byte) []int16 {
+	samples := make([]int16, len(buf)/2)
+	for i := range samples {
+		samples[i] = int16(buf[i*2]) | (int16(buf[i*2+1]) << 8)
+	}
+	return samples
+}
+
 // TestConstructor 测试VAD实例创建
 func TestConstructor(t *testing.T) {
 	vad, err := New(0)
@@ -192,6 +200,42 @@ func BenchmarkIsSpeech(b *testing.B) {
 	}
 }
 
+func TestIsSpeechInt16MatchesBytes(t *testing.T) {
+	frameLen := 160
+	sampleRate := 16000
+	sample := make([]byte, frameLen*2)
+
+	for i := range sample {
+		sample[i] = byte(i % 256)
+	}
+
+	samples := testBytesToInt16(sample)
+
+	vadBytes, err := New(1)
+	if err != nil {
+		t.Fatalf("Failed to create byte VAD: %v", err)
+	}
+
+	vadInt16, err := New(1)
+	if err != nil {
+		t.Fatalf("Failed to create int16 VAD: %v", err)
+	}
+
+	gotBytes, err := vadBytes.IsSpeech(sample, sampleRate)
+	if err != nil {
+		t.Fatalf("Failed to process bytes: %v", err)
+	}
+
+	gotInt16, err := vadInt16.IsSpeechInt16(samples, sampleRate)
+	if err != nil {
+		t.Fatalf("Failed to process int16 samples: %v", err)
+	}
+
+	if gotBytes != gotInt16 {
+		t.Fatalf("IsSpeech mismatch: bytes=%v int16=%v", gotBytes, gotInt16)
+	}
+}
+
 // BenchmarkIsSpeech8kHz 8kHz采样率基准测试
 func BenchmarkIsSpeech8kHz(b *testing.B) {
 	frameLen := 80
@@ -234,6 +278,31 @@ func BenchmarkIsSpeech48kHz(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := vad.IsSpeech(sample, sampleRate)
+		if err != nil {
+			b.Fatalf("Failed to process audio: %v", err)
+		}
+	}
+}
+
+func BenchmarkIsSpeechInt16(b *testing.B) {
+	frameLen := 160
+	sampleRate := 16000
+	sample := make([]byte, frameLen*2)
+
+	for i := range sample {
+		sample[i] = byte(i % 256)
+	}
+
+	samples := testBytesToInt16(sample)
+
+	vad, err := New(1)
+	if err != nil {
+		b.Fatalf("Failed to create VAD: %v", err)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := vad.IsSpeechInt16(samples, sampleRate)
 		if err != nil {
 			b.Fatalf("Failed to process audio: %v", err)
 		}

@@ -79,14 +79,16 @@ func (s *StreamVAD) Write(data []byte) ([]VoiceSegment, error) {
 	s.buffer = append(s.buffer, data...)
 
 	var newSegments []VoiceSegment
+	processed := 0
 
 	// 处理所有完整的帧
-	for len(s.buffer) >= s.frameSize {
-		frame := s.buffer[:s.frameSize]
+	for len(s.buffer)-processed >= s.frameSize {
+		frame := s.buffer[processed : processed+s.frameSize]
 
 		// 检测当前帧
 		isSpeech, err := s.vad.IsSpeech(frame, s.sampleRate)
 		if err != nil {
+			s.compactBuffer(processed)
 			return nil, err
 		}
 
@@ -119,11 +121,22 @@ func (s *StreamVAD) Write(data []byte) ([]VoiceSegment, error) {
 			newSegments = append(newSegments, segment)
 		}
 
-		// 移除已处理的帧
-		s.buffer = s.buffer[s.frameSize:]
+		processed += s.frameSize
 	}
 
+	s.compactBuffer(processed)
+
 	return newSegments, nil
+}
+
+func (s *StreamVAD) compactBuffer(processed int) {
+	if processed == 0 {
+		return
+	}
+
+	remaining := len(s.buffer) - processed
+	copy(s.buffer, s.buffer[processed:])
+	s.buffer = s.buffer[:remaining]
 }
 
 // GetSegments 获取所有语音片段

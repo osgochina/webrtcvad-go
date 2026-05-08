@@ -180,7 +180,7 @@ func TestVoiceSegmentDuration(t *testing.T) {
 	// 检查总时长
 	totalDuration := svad.GetTotalDuration()
 	expectedDuration := time.Second
-	
+
 	// 允许一点误差
 	diff := totalDuration - expectedDuration
 	if diff < 0 {
@@ -203,3 +203,27 @@ func BenchmarkStreamVADWrite(b *testing.B) {
 	}
 }
 
+func TestStreamVADWriteReusesBuffer(t *testing.T) {
+	svad, err := NewStreamVAD(1, 16000, 10)
+	if err != nil {
+		t.Fatalf("创建StreamVAD失败: %v", err)
+	}
+
+	frameSize := 16000 * 10 / 1000 * 2
+	audioData := make([]byte, frameSize)
+	initialCap := cap(svad.buffer)
+
+	for i := 0; i < 8; i++ {
+		if _, err := svad.Write(audioData); err != nil {
+			t.Fatalf("写入音频失败: %v", err)
+		}
+	}
+
+	if len(svad.buffer) != 0 {
+		t.Fatalf("处理完整帧后缓冲区应为空，得到 %d", len(svad.buffer))
+	}
+
+	if cap(svad.buffer) != initialCap {
+		t.Fatalf("缓冲区容量不应退化: initial=%d current=%d", initialCap, cap(svad.buffer))
+	}
+}
